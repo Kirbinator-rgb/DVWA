@@ -1,19 +1,26 @@
 <?php
 
-$headerCSP = "Content-Security-Policy: script-src 'self' 'unsafe-inline' 'nonce-TmV2ZXIgZ29pbmcgdG8gZ2l2ZSB5b3UgdXA=';";
+// This level is protected by the same policy as this module's impossible level: script-src is
+// narrowed to 'self'. What was here before undid itself twice over -- 'unsafe-inline' permits
+// exactly the inline script a policy exists to stop, and the nonce was a hardcoded constant
+// baked into the source, so anyone reading the page could quote it and have their own inline
+// script trusted. A nonce is only worth anything when it is unpredictable and issued per
+// response.
+$headerCSP = "Content-Security-Policy: script-src 'self';";
 
 header($headerCSP);
 
-// Disable XSS protections so that inline alert boxes will work
-header ("X-XSS-Protection: 0");
-
-# <script nonce="TmV2ZXIgZ29pbmcgdG8gZ2l2ZSB5b3UgdXA=">alert(1)</script>
+// The X-XSS-Protection: 0 header that used to be sent here switched off the browser's own
+// filtering to make injected alerts work. Nothing should be asking a browser to lower its
+// defences.
 
 ?>
 <?php
 if (isset ($_POST['include'])) {
+// Submitted text is dropped straight into the page, so it is escaped rather than trusted as
+// markup. The policy above is a second line of defence, not the only one.
 $page[ 'body' ] .= "
-	" . $_POST['include'] . "
+	" . htmlspecialchars( $_POST['include'], ENT_QUOTES, 'UTF-8' ) . "
 ";
 }
 $page[ 'body' ] .= '

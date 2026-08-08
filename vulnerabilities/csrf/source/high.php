@@ -14,6 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] == "POST" && array_key_exists ("CONTENT_TYPE", $_
 		$token = $_SERVER['HTTP_USER_TOKEN'];
 		$pass_new = $data["password_new"];
 		$pass_conf = $data["password_conf"];
+		$pass_curr = array_key_exists("password_current", $data) ? $data["password_current"] : "";
 		$change = true;
 	}
 } else {
@@ -24,6 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] == "POST" && array_key_exists ("CONTENT_TYPE", $_
 		$token = $_REQUEST["user_token"];
 		$pass_new = $_REQUEST["password_new"];
 		$pass_conf = $_REQUEST["password_conf"];
+		$pass_curr = array_key_exists("password_current", $_REQUEST) ? $_REQUEST["password_current"] : "";
 		$change = true;
 	}
 }
@@ -32,23 +34,34 @@ if ($change) {
 	// Check Anti-CSRF token
 	checkToken( $token, $_SESSION[ 'session_token' ], 'index.php' );
 
-	// Do the passwords match?
-	if( $pass_new == $pass_conf ) {
-		// They do!
-		$pass_new = mysqli_real_escape_string ($GLOBALS["___mysqli_ston"], $pass_new);
-		$pass_new = md5( $pass_new );
+	// A token alone only proves the request came from a page on this site. Re-authenticating
+	// with the current password is what stops a request the user was tricked into sending --
+	// or one replayed with a captured token -- from taking over the account. This is the same
+	// control the impossible level uses.
+	$current_user = dvwaCurrentUser();
+	$data = $db->prepare( 'SELECT password FROM users WHERE user = (:user) AND password = (:password) LIMIT 1;' );
+	$pass_curr_hash = md5( stripslashes( $pass_curr ) );
+	$data->bindParam( ':user', $current_user, PDO::PARAM_STR );
+	$data->bindParam( ':password', $pass_curr_hash, PDO::PARAM_STR );
+	$data->execute();
 
-		// Update the database
-		$current_user = dvwaCurrentUser();
-		$insert = "UPDATE `users` SET password = '" . $pass_new . "' WHERE user = '" . $current_user . "';";
-		$result = mysqli_query($GLOBALS["___mysqli_ston"],  $insert );
+	// Do both new passwords match, and does the current password match the user?
+	if( ( $pass_new == $pass_conf ) && ( $data->rowCount() == 1 ) ) {
+		// They do!
+		$pass_new = md5( stripslashes( $pass_new ) );
+
+		// Update the database. Parameterised so the new password cannot alter the statement.
+		$data = $db->prepare( 'UPDATE users SET password = (:password) WHERE user = (:user);' );
+		$data->bindParam( ':password', $pass_new, PDO::PARAM_STR );
+		$data->bindParam( ':user', $current_user, PDO::PARAM_STR );
+		$data->execute();
 
 		// Feedback for the user
 		$return_message = "Password Changed.";
 	}
 	else {
 		// Issue with passwords matching
-		$return_message = "Passwords did not match.";
+		$return_message = "Passwords did not match or current password incorrect.";
 	}
 
 	mysqli_close($GLOBALS["___mysqli_ston"]);

@@ -53,11 +53,12 @@ $page[ 'body' ] .= "
 		</div><br />
 		<form action=\"#\" method=\"GET\">";
 
-if( $vulnerabilityFile == 'impossible.php' ) {
-	$page[ 'body' ] .= "
-			Current password:<br />
-			<input type=\"password\" AUTOCOMPLETE=\"off\" name=\"password_current\"><br />";
-}
+// Every level now re-authenticates before changing the password, so every level's form has to
+// offer the field. Rendering it only for impossible.php would leave the other levels with a
+// form that cannot satisfy their own handler.
+$page[ 'body' ] .= "
+		Current password:<br />
+		<input type=\"password\" AUTOCOMPLETE=\"off\" name=\"password_current\"><br />";
 
 $page[ 'body' ] .= "
 			New password:<br />
@@ -67,8 +68,8 @@ $page[ 'body' ] .= "
 			<br />
 			<input type=\"submit\" value=\"Change\" name=\"Change\">\n";
 
-if( $vulnerabilityFile == 'high.php' || $vulnerabilityFile == 'impossible.php' )
-	$page[ 'body' ] .= "			" . tokenField();
+// Likewise the anti-CSRF token: every level checks it now, so every level's form must carry it.
+$page[ 'body' ] .= "			" . tokenField();
 
 $page[ 'body' ] .= "
 		</form>

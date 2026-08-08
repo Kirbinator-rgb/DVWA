@@ -638,7 +638,10 @@ function checkToken( $user_token, $session_token, $returnURL ) {  # Validate the
 		return true;
 	}
 
-	if( $user_token !== $session_token || !isset( $session_token ) ) {
+	// hash_equals compares in time independent of where the first difference falls, so the
+	// number of leading characters an attacker got right cannot be read off the response time
+	// and used to recover the token one character at a time.
+	if( !isset( $session_token ) || !is_string( $user_token ) || !hash_equals( $session_token, $user_token ) ) {
 		dvwaMessagePush( 'CSRF token is incorrect' );
 		dvwaRedirect( $returnURL );
 	}
@@ -648,7 +651,10 @@ function generateSessionToken() {  # Generate a brand new (CSRF) token
 	if( isset( $_SESSION[ 'session_token' ] ) ) {
 		destroySessionToken();
 	}
-	$_SESSION[ 'session_token' ] = md5( uniqid() );
+	// uniqid() is the current time to the microsecond, so md5( uniqid() ) is guessable: an
+	// attacker who knows roughly when a token was minted can enumerate the candidates and
+	// forge one. Anti-CSRF tokens have to be unpredictable, which means a CSPRNG.
+	$_SESSION[ 'session_token' ] = bin2hex( random_bytes( 32 ) );
 }
 
 function destroySessionToken() {  # Destroy any session with the name 'session_token'
