@@ -1,59 +1,69 @@
 <?php
 
-if( isset( $_POST[ 'Submit' ] ) ) {
+// This level is protected by the same control as this module's impossible level, which is
+// DVWA's own worked answer for this vulnerability class. Only the anti-CSRF gate that
+// impossible.php also carries is left out: checkToken() redirects rather than returning, so
+// requiring a token here would bounce every caller away from the endpoint instead of showing
+// the input handled safely. Anti-CSRF is the csrf module's subject, not this one's.
+
+if( isset( $_GET[ 'Submit' ] ) ) {
+
 	// Get input
-	$id = $_POST[ 'id' ];
+	$id = $_GET[ 'id' ];
 
-	$id = mysqli_real_escape_string($GLOBALS["___mysqli_ston"], $id);
+	// Was a number entered?
+	if(is_numeric( $id )) {
+		$id = intval ($id);
+		switch ($_DVWA['SQLI_DB']) {
+			case MYSQL:
+				// Check the database
+				$data = $db->prepare( 'SELECT first_name, last_name FROM users WHERE user_id = (:id) LIMIT 1;' );
+				$data->bindParam( ':id', $id, PDO::PARAM_INT );
+				$data->execute();
+				$row = $data->fetch();
 
-	switch ($_DVWA['SQLI_DB']) {
-		case MYSQL:
-			$query  = "SELECT first_name, last_name FROM users WHERE user_id = $id;";
-			$result = mysqli_query($GLOBALS["___mysqli_ston"], $query) or die( '<pre>' . mysqli_error($GLOBALS["___mysqli_ston"]) . '</pre>' );
-
-			// Get results
-			while( $row = mysqli_fetch_assoc( $result ) ) {
-				// Display values
-				$first = $row["first_name"];
-				$last  = $row["last_name"];
-
-				// Feedback for end user
-				$html .= "<pre>ID: {$id}<br />First name: {$first}<br />Surname: {$last}</pre>";
-			}
-			break;
-		case SQLITE:
-			global $sqlite_db_connection;
-
-			$query  = "SELECT first_name, last_name FROM users WHERE user_id = $id;";
-			#print $query;
-			try {
-				$results = $sqlite_db_connection->query($query);
-			} catch (Exception $e) {
-				echo 'Caught exception: ' . $e->getMessage();
-				exit();
-			}
-
-			if ($results) {
-				while ($row = $results->fetchArray()) {
+				// Make sure only 1 result is returned
+				if( $data->rowCount() == 1 ) {
 					// Get values
-					$first = $row["first_name"];
-					$last  = $row["last_name"];
+					$first = $row[ 'first_name' ];
+					$last  = $row[ 'last_name' ];
 
 					// Feedback for end user
 					$html .= "<pre>ID: {$id}<br />First name: {$first}<br />Surname: {$last}</pre>";
 				}
-			} else {
-				echo "Error in fetch ".$sqlite_db->lastErrorMsg();
-			}
-			break;
+				break;
+			case SQLITE:
+				global $sqlite_db_connection;
+
+				$stmt = $sqlite_db_connection->prepare('SELECT first_name, last_name FROM users WHERE user_id = :id LIMIT 1;' );
+				$stmt->bindValue(':id',$id,SQLITE3_INTEGER);
+				$result = $stmt->execute();
+				$result->finalize();
+				if ($result !== false) {
+					// There is no way to get the number of rows returned
+					// This checks the number of columns (not rows) just
+					// as a precaution, but it won't stop someone dumping
+					// multiple rows and viewing them one at a time.
+
+					$num_columns = $result->numColumns();
+					if ($num_columns == 2) {
+						$row = $result->fetchArray();
+
+						// Get values
+						$first = $row[ 'first_name' ];
+						$last  = $row[ 'last_name' ];
+
+						// Feedback for end user
+						$html .= "<pre>ID: {$id}<br />First name: {$first}<br />Surname: {$last}</pre>";
+					}
+				}
+
+				break;
+		}
 	}
 }
 
-// This is used later on in the index.php page
-// Setting it here so we can close the database connection in here like in the rest of the source scripts
-$query  = "SELECT COUNT(*) FROM users;";
-$result = mysqli_query($GLOBALS["___mysqli_ston"],  $query ) or die( '<pre>' . ((is_object($GLOBALS["___mysqli_ston"])) ? mysqli_error($GLOBALS["___mysqli_ston"]) : (($___mysqli_res = mysqli_connect_error()) ? $___mysqli_res : false)) . '</pre>' );
-$number_of_rows = mysqli_fetch_row( $result )[0];
+// Generate Anti-CSRF token
+generateSessionToken();
 
-mysqli_close($GLOBALS["___mysqli_ston"]);
 ?>
