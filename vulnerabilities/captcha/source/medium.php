@@ -1,12 +1,43 @@
 <?php
 
-if( isset( $_POST[ 'Change' ] ) && ( $_POST[ 'step' ] == '1' ) ) {
+// This level is protected by the same control as this module's impossible level. Three separate
+// ways past the CAPTCHA are closed by adopting it.
+//
+// The two-step flow was the flaw: step one checked the CAPTCHA, step two changed the password,
+// and step two was an ordinary POST that could be sent on its own. Whether step one had happened
+// was recorded either nowhere at all or in a hidden `passed_captcha` field the caller supplied
+// -- asking the client to vouch for itself. The check and the action now happen in one request,
+// so there is no interval in which the result of the CAPTCHA is carried by the attacker.
+//
+// The high level additionally accepted a fixed string with a matching User-Agent as proof of
+// passing. A hardcoded backdoor is not a weaker check, it is no check.
+//
+// Changing the password also requires the current one, so the form cannot be driven by someone
+// who merely reaches the endpoint, and both queries are parameterised.
+//
+// The anti-CSRF gate impossible.php also carries is left out: checkToken() redirects rather than
+// returning, which would bounce a caller away before the CAPTCHA was ever evaluated.
+
+if( isset( $_POST[ 'Change' ] ) ) {
+
 	// Hide the CAPTCHA form
 	$hide_form = true;
 
 	// Get input
 	$pass_new  = $_POST[ 'password_new' ];
+	$pass_new  = stripslashes( $pass_new );
+	$pass_new  = ((isset($GLOBALS["___mysqli_ston"]) && is_object($GLOBALS["___mysqli_ston"])) ? mysqli_real_escape_string($GLOBALS["___mysqli_ston"],  $pass_new ) : ((trigger_error("[MySQLConverterToo] Fix the mysql_escape_string() call! This code does not work.", E_USER_ERROR)) ? "" : ""));
+	$pass_new  = md5( $pass_new );
+
 	$pass_conf = $_POST[ 'password_conf' ];
+	$pass_conf = stripslashes( $pass_conf );
+	$pass_conf = ((isset($GLOBALS["___mysqli_ston"]) && is_object($GLOBALS["___mysqli_ston"])) ? mysqli_real_escape_string($GLOBALS["___mysqli_ston"],  $pass_conf ) : ((trigger_error("[MySQLConverterToo] Fix the mysql_escape_string() call! This code does not work.", E_USER_ERROR)) ? "" : ""));
+	$pass_conf = md5( $pass_conf );
+
+	$pass_curr = $_POST[ 'password_current' ];
+	$pass_curr = stripslashes( $pass_curr );
+	$pass_curr = ((isset($GLOBALS["___mysqli_ston"]) && is_object($GLOBALS["___mysqli_ston"])) ? mysqli_real_escape_string($GLOBALS["___mysqli_ston"],  $pass_curr ) : ((trigger_error("[MySQLConverterToo] Fix the mysql_escape_string() call! This code does not work.", E_USER_ERROR)) ? "" : ""));
+	$pass_curr = md5( $pass_curr );
 
 	// Check CAPTCHA from 3rd party
 	$resp = recaptcha_check_answer(
@@ -17,67 +48,36 @@ if( isset( $_POST[ 'Change' ] ) && ( $_POST[ 'step' ] == '1' ) ) {
 	// Did the CAPTCHA fail?
 	if( !$resp ) {
 		// What happens when the CAPTCHA was entered incorrectly
-		$html     .= "<pre><br />The CAPTCHA was incorrect. Please try again.</pre>";
+		$html .= "<pre><br />The CAPTCHA was incorrect. Please try again.</pre>";
 		$hide_form = false;
-		return;
 	}
 	else {
-		// CAPTCHA was correct. Do both new passwords match?
-		if( $pass_new == $pass_conf ) {
-			// Show next stage for the user
-			$html .= "
-				<pre><br />You passed the CAPTCHA! Click the button to confirm your changes.<br /></pre>
-				<form action=\"#\" method=\"POST\">
-					<input type=\"hidden\" name=\"step\" value=\"2\" />
-					<input type=\"hidden\" name=\"password_new\" value=\"{$pass_new}\" />
-					<input type=\"hidden\" name=\"password_conf\" value=\"{$pass_conf}\" />
-					<input type=\"hidden\" name=\"passed_captcha\" value=\"true\" />
-					<input type=\"submit\" name=\"Change\" value=\"Change\" />
-				</form>";
+		// Check that the current password is correct
+		$data = $db->prepare( 'SELECT password FROM users WHERE user = (:user) AND password = (:password) LIMIT 1;' );
+		$data->bindParam( ':user', dvwaCurrentUser(), PDO::PARAM_STR );
+		$data->bindParam( ':password', $pass_curr, PDO::PARAM_STR );
+		$data->execute();
+
+		// Do both new password match and was the current password correct?
+		if( ( $pass_new == $pass_conf) && ( $data->rowCount() == 1 ) ) {
+			// Update the database
+			$data = $db->prepare( 'UPDATE users SET password = (:password) WHERE user = (:user);' );
+			$data->bindParam( ':password', $pass_new, PDO::PARAM_STR );
+			$data->bindParam( ':user', dvwaCurrentUser(), PDO::PARAM_STR );
+			$data->execute();
+
+			// Feedback for the end user - success!
+			$html .= "<pre>Password Changed.</pre>";
 		}
 		else {
-			// Both new passwords do not match.
-			$html     .= "<pre>Both passwords must match.</pre>";
+			// Feedback for the end user - failed!
+			$html .= "<pre>Either your current password is incorrect or the new passwords did not match.<br />Please try again.</pre>";
 			$hide_form = false;
 		}
 	}
 }
 
-if( isset( $_POST[ 'Change' ] ) && ( $_POST[ 'step' ] == '2' ) ) {
-	// Hide the CAPTCHA form
-	$hide_form = true;
-
-	// Get input
-	$pass_new  = $_POST[ 'password_new' ];
-	$pass_conf = $_POST[ 'password_conf' ];
-
-	// Check to see if they did stage 1
-	if( !$_POST[ 'passed_captcha' ] ) {
-		$html     .= "<pre><br />You have not passed the CAPTCHA.</pre>";
-		$hide_form = false;
-		return;
-	}
-
-	// Check to see if both password match
-	if( $pass_new == $pass_conf ) {
-		// They do!
-		$pass_new = ((isset($GLOBALS["___mysqli_ston"]) && is_object($GLOBALS["___mysqli_ston"])) ? mysqli_real_escape_string($GLOBALS["___mysqli_ston"],  $pass_new ) : ((trigger_error("[MySQLConverterToo] Fix the mysql_escape_string() call! This code does not work.", E_USER_ERROR)) ? "" : ""));
-		$pass_new = md5( $pass_new );
-
-		// Update database
-		$insert = "UPDATE `users` SET password = '$pass_new' WHERE user = '" . dvwaCurrentUser() . "';";
-		$result = mysqli_query($GLOBALS["___mysqli_ston"],  $insert ) or die( '<pre>' . ((is_object($GLOBALS["___mysqli_ston"])) ? mysqli_error($GLOBALS["___mysqli_ston"]) : (($___mysqli_res = mysqli_connect_error()) ? $___mysqli_res : false)) . '</pre>' );
-
-		// Feedback for the end user
-		$html .= "<pre>Password Changed.</pre>";
-	}
-	else {
-		// Issue with the passwords matching
-		$html .= "<pre>Passwords did not match.</pre>";
-		$hide_form = false;
-	}
-
-	((is_null($___mysqli_res = mysqli_close($GLOBALS["___mysqli_ston"]))) ? false : $___mysqli_res);
-}
+// Generate Anti-CSRF token
+generateSessionToken();
 
 ?>

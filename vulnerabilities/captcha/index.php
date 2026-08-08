@@ -59,11 +59,11 @@ $page[ 'body' ] .= ">
 
 			<input type=\"hidden\" name=\"step\" value=\"1\" />\n";
 
-if( $vulnerabilityFile == 'impossible.php' ) {
-	$page[ 'body' ] .= "
-			Current password:<br />
-			<input type=\"password\" AUTOCOMPLETE=\"off\" name=\"password_current\"><br />";
-}
+// Every level now re-authenticates before changing the password, so every level's form has to
+// offer the field.
+$page[ 'body' ] .= "
+		Current password:<br />
+		<input type=\"password\" AUTOCOMPLETE=\"off\" name=\"password_current\"><br />";
 
 $page[ 'body' ] .= "			New password:<br />
 			<input type=\"password\" AUTOCOMPLETE=\"off\" name=\"password_new\"><br />
@@ -71,8 +71,9 @@ $page[ 'body' ] .= "			New password:<br />
 			<input type=\"password\" AUTOCOMPLETE=\"off\" name=\"password_conf\"><br />
 
 			" . recaptcha_get_html( $_DVWA[ 'recaptcha_public_key' ] );
-if( $vulnerabilityFile == 'high.php' )
-	$page[ 'body' ] .= "\n\n			<!-- **DEV NOTE**   Response: 'hidd3n_valu3'   &&   User-Agent: 'reCAPTCHA'   **/DEV NOTE** -->\n";
+// The "DEV NOTE" comment that used to be emitted here published the high level's CAPTCHA
+// backdoor -- the magic response value and the User-Agent that went with it -- straight into the
+// page source. The backdoor itself is gone, and so is the note advertising it.
 
 if( $vulnerabilityFile == 'high.php' || $vulnerabilityFile == 'impossible.php' )
 	$page[ 'body' ] .= "\n			" . tokenField();

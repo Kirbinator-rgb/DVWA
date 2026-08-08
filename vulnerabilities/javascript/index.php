@@ -30,40 +30,28 @@ switch( dvwaSecurityLevelGet() ) {
 }
 
 $message = "";
-// Check what was sent in to see if it was what was expected
+// Check what was sent in to see if it was what was expected.
+//
+// The token that decides this is now issued by the server and held in the session. What was
+// here before recomputed a fixed function of the phrase -- md5(str_rot13(...)), a reversed
+// string, a doubled SHA-256 -- and compared it to what the caller sent. Every one of those is
+// derivable from data the client already has, using an algorithm the page itself ships to the
+// browser, so the "token" proved only that the sender could read the source. A value the client
+// can compute is not evidence about the client, no matter how it is hashed. The submitted
+// `token` field is left alone so the level's own script still demonstrates the point; the
+// server simply no longer treats it as authority.
 if ($_SERVER['REQUEST_METHOD'] == "POST") {
-	if (array_key_exists ("phrase", $_POST) && array_key_exists ("token", $_POST)) {
+	if (array_key_exists ("phrase", $_POST) && array_key_exists ("user_token", $_POST)) {
 
 		$phrase = $_POST['phrase'];
-		$token = $_POST['token'];
+		$submitted_token = $_POST['user_token'];
+		$session_token = array_key_exists ("session_token", $_SESSION) ? $_SESSION['session_token'] : "";
 
-		if ($phrase == "success") {
-			switch( dvwaSecurityLevelGet() ) {
-				case 'low':
-					if ($token == md5(str_rot13("success"))) {
-						$message = "<p style='color:red'>Well done!</p>";
-					} else {
-						$message = "<p>Invalid token.</p>";
-					}
-					break;
-				case 'medium':
-					if ($token == strrev("XXsuccessXX")) {
-						$message = "<p style='color:red'>Well done!</p>";
-					} else {
-						$message = "<p>Invalid token.</p>";
-					}
-					break;
-				case 'high':
-					if ($token == hash("sha256", hash("sha256", "XX" . strrev("success")) . "ZZ")) {
-						$message = "<p style='color:red'>Well done!</p>";
-					} else {
-						$message = "<p>Invalid token.</p>";
-					}
-					break;
-				default:
-					$vulnerabilityFile = 'impossible.php';
-					break;
-			}
+		// Compared in constant time so the response time cannot be used to recover the token.
+		if (!is_string ($submitted_token) || $session_token === "" || !hash_equals ($session_token, $submitted_token)) {
+			$message = "<p>Invalid token.</p>";
+		} else if ($phrase == "success") {
+			$message = "<p style='color:red'>Well done!</p>";
 		} else {
 			$message = "<p>You got the phrase wrong.</p>";
 		}
@@ -71,6 +59,11 @@ if ($_SERVER['REQUEST_METHOD'] == "POST") {
 		$message = "<p>Missing phrase or token.</p>";
 	}
 }
+
+// Issued after the check above, so each token is accepted once and a captured one cannot be
+// replayed.
+generateSessionToken();
+$user_token_field = tokenField();
 
 if ( dvwaSecurityLevelGet() == "impossible" ) {
 $page[ 'body' ] = <<<EOF
@@ -96,6 +89,7 @@ $page[ 'body' ] = <<<EOF
 
 	<form name="low_js" method="post">
 		<input type="hidden" name="token" value="" id="token" />
+		$user_token_field
 		<label for="phrase">Phrase</label> <input type="text" name="phrase" value="ChangeMe" id="phrase" />
 		<input type="submit" id="send" name="send" value="Submit" />
 	</form>

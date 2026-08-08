@@ -31,11 +31,8 @@ switch( dvwaSecurityLevelGet() ) {
 
 require_once DVWA_WEB_PAGE_TO_ROOT . "vulnerabilities/xss_d/source/{$vulnerabilityFile}";
 
-# For the impossible level, don't decode the querystring
-$decodeURI = "decodeURI";
-if ($vulnerabilityFile == 'impossible.php') {
-	$decodeURI = "";
-}
+# The querystring is no longer written into the page as markup at any level, so whether it is
+# decoded first no longer decides whether it can be executed -- see the script below.
 
 $page[ 'body' ] = <<<EOF
 <div class="body_padded">
@@ -48,16 +45,51 @@ $page[ 'body' ] = <<<EOF
 		<form name="XSS" method="GET">
 			<select name="default">
 				<script>
-					if (document.location.href.indexOf("default=") >= 0) {
-						var lang = document.location.href.substring(document.location.href.indexOf("default=")+8);
-						document.write("<option value='" + lang + "'>" + $decodeURI(lang) + "</option>");
-						document.write("<option value='' disabled='disabled'>----</option>");
-					}
-					    
-					document.write("<option value='English'>English</option>");
-					document.write("<option value='French'>French</option>");
-					document.write("<option value='Spanish'>Spanish</option>");
-					document.write("<option value='German'>German</option>");
+					// The language from the URL is put into the page as *data*, never as markup.
+					// This used to be built by pasting the raw querystring into a document.write
+					// string, so a value carrying its own quote closed the value= attribute and
+					// anything after it was parsed as HTML -- the page wrote the attacker's
+					// markup into its own DOM. createElement with .textContent and .value cannot
+					// do that: whatever the string contains, it stays a string, so there is
+					// nothing to escape and nothing to blocklist.
+					(function () {
+						var select = document.currentScript.parentNode;
+
+						function addOption(value, label, disabled) {
+							var option = document.createElement("option");
+							option.value = value;
+							option.textContent = label;
+							if (disabled) {
+								option.disabled = true;
+							}
+							select.appendChild(option);
+						}
+
+						var marker = document.location.href.indexOf("default=");
+						if (marker >= 0) {
+							var lang = document.location.href.substring(marker + 8);
+							var next = lang.indexOf("&");
+							if (next >= 0) {
+								lang = lang.substring(0, next);
+							}
+							// Decoding is only for what the user reads. It is safe here because
+							// the result is assigned as text; decodeURI throws on a malformed
+							// sequence, so the raw value is shown if it cannot be decoded.
+							var label = lang;
+							try {
+								label = decodeURI(lang);
+							} catch (e) {
+								label = lang;
+							}
+							addOption(lang, label, false);
+							addOption("", "----", true);
+						}
+
+						addOption("English", "English", false);
+						addOption("French", "French", false);
+						addOption("Spanish", "Spanish", false);
+						addOption("German", "German", false);
+					})();
 				</script>
 			</select>
 			<input type="submit" value="Select" />
