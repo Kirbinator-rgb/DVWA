@@ -218,12 +218,15 @@ class UserController
 			$gc->processRequest();
 			exit();
 		}
-		if (array_key_exists ("name", $input)) {
-			$this->data[$id]->name = $input['name'];
-		}
-		if (array_key_exists ("level", $input)) {
-			$this->data[$id]->level = intval ($input['level']);
-		}
+		// Only the fields this operation is documented to accept are applied. The update schema
+		// (UserUpdate) declares "name" alone, but the handler used to bind whatever the caller
+		// sent -- so adding "level": 0 to the body of a name change promoted the account to
+		// admin. Privilege is not something a user may assign to themselves in passing, and a
+		// request body is not a safe source for it.
+		//
+		// Binding request fields to an object wholesale is the mass-assignment mistake: the
+		// allowed fields are listed here rather than inferred from what happened to arrive.
+		$this->data[$id]->name = $input['name'];
 		$response['status_code_header'] = 'HTTP/1.1 200 OK';
 		$response['body'] = json_encode ($this->data[$id]->toArray($this->version));
 		return $response;

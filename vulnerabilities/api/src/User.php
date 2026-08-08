@@ -36,26 +36,20 @@ final class User
 	}
 
 	public function toArray($version) {
-		switch ($version) {
-			case 1:
-				$a = array (
-					"id" => $this->id,
-					"name" => $this->name,
-					"level" => $this->level,
-					"password" => $this->password,
-				);
-				break;
-			default:
-			case 2:
-				$a = array (
-					"id" => $this->id,
-					"name" => $this->name,
-					"level" => $this->level,
-				);
-				break;
-		}
-
-		return $a;
+		// The password hash is never part of a user representation, at any version. Keeping an
+		// older version alive is a compatibility decision; it is not a licence for that version
+		// to disclose more than the current one. v1 used to return the stored hash to any
+		// unauthenticated caller who asked for it, so every account was offline-crackable by
+		// changing a single digit in the URL -- the retired version was doing the leaking while
+		// the maintained one looked clean.
+		//
+		// A response should carry the fields the caller needs and nothing else, decided here on
+		// the server rather than left to the client to filter.
+		return array (
+			"id" => $this->id,
+			"name" => $this->name,
+			"level" => $this->level,
+		);
 	}
 }
 

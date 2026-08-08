@@ -641,7 +641,10 @@ function checkToken( $user_token, $session_token, $returnURL ) {  # Validate the
 	// hash_equals compares in time independent of where the first difference falls, so the
 	// number of leading characters an attacker got right cannot be read off the response time
 	// and used to recover the token one character at a time.
-	if( !isset( $session_token ) || !is_string( $user_token ) || !hash_equals( $session_token, $user_token ) ) {
+	// Both arguments are type-checked before the comparison. hash_equals() raises a TypeError on
+	// a non-string, and a request can present user_token as an array, so an unchecked call would
+	// turn a malformed token into a fatal error rather than a rejected request.
+	if( !isset( $session_token ) || !is_string( $session_token ) || !is_string( $user_token ) || !hash_equals( $session_token, $user_token ) ) {
 		dvwaMessagePush( 'CSRF token is incorrect' );
 		dvwaRedirect( $returnURL );
 	}

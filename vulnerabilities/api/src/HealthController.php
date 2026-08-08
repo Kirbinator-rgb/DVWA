@@ -85,7 +85,22 @@ class HealthController
 		if (array_key_exists ("target", $input)) {
 			$target = $input['target'];
 
-			exec ("ping -c 4 " . $target, $output, $ret_var);
+			// The target was concatenated straight into a shell command line, so a body of
+			// {"target": "localhost; id"} ran whatever followed the separator as the web server
+			// user. A connectivity check has no reason to accept anything but a host.
+			//
+			// Two controls, because either alone is thin. The target must first look like a
+			// hostname or IP address -- letters, digits, dots and hyphens only, and short
+			// enough to be a real name -- which leaves no shell metacharacter to find. It is
+			// then passed through escapeshellarg so that even if that pattern is ever widened,
+			// the value stays a single argument to ping instead of becoming syntax.
+			if (!is_string ($target) || strlen ($target) > 253 || !preg_match ('/^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$/', $target)) {
+				$response['status_code_header'] = 'HTTP/1.1 400 Bad Request';
+				$response['body'] = json_encode (array ("status" => "Invalid target"));
+				return $response;
+			}
+
+			exec ("ping -c 4 " . escapeshellarg ($target), $output, $ret_var);
 
 			if ($ret_var == 0) {
 				$response['status_code_header'] = 'HTTP/1.1 200 OK';
