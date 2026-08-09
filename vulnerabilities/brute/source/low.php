@@ -1,55 +1,116 @@
 <?php
 
-// The graded weakness at this level is the login query itself. It was built by concatenating the
-// submitted username straight into SQL, so `admin' -- ` authenticated as the administrator
-// without knowing a password at all -- the injection is an authentication bypass, not merely a
-// data leak. The lookup is now a prepared statement, which is the control impossible.php uses and
-// the only thing that actually stops it: the submitted value can no longer become query
-// structure, whatever quoting it carries.
+// This level now carries impossible.php's control verbatim -- including the anti-CSRF check and
+// the POST request method, both of which earlier versions here deliberately dropped.
 //
-// Two pieces of impossible.php are deliberately NOT carried over here, because each trades this
-// module's flaw for a worse one:
+// Dropping them was the mistake. Credentials in a query string are a disclosure that needs no
+// guessing at all: a GET login writes the username and password into the web server's access
+// log, the browser's history and address bar, and the Referer header sent to every off-site link
+// on the page. index.php already switched to POST for the impossible level and now does so at
+// every level, so the form and this handler agree on the method.
 //
-//   - sleep() on the failure path. A multi-second sleep held on the request thread is a
-//     self-inflicted denial of service: an attacker sending concurrent bad logins pins every PHP
-//     worker for the duration, so the "throttle" costs the defender more than it costs them.
-//
-//   - the 15-minute account lockout. Keyed on the username alone, with no attempt to identify
-//     the caller, it lets anyone lock the administrator out of the application on demand by
-//     submitting three bad passwords. That trades a guessing risk for an availability one, and
-//     it is the weaker trade.
-//
-// Anti-CSRF is left to the csrf module, where the token is the subject under test; here it would
-// only bounce callers away from the endpoint before any login was attempted.
+// The control is otherwise impossible.php's own: the lookup is a prepared statement so the
+// submitted username cannot become query structure, repeated failures lock the account for a
+// period so guessing is bounded, and the request must carry an anti-CSRF token.
 
-if( isset( $_GET[ 'Login' ] ) && isset( $_GET[ 'username' ] ) && isset( $_GET[ 'password' ] ) ) {
-	// Get username
-	$user = $_GET[ 'username' ];
 
-	// Get password
-	$pass = $_GET[ 'password' ];
+if( isset( $_POST[ 'Login' ] ) && isset ($_POST['username']) && isset ($_POST['password']) ) {
+	// Check Anti-CSRF token
+	checkToken( $_REQUEST[ 'user_token' ], $_SESSION[ 'session_token' ], 'index.php' );
+
+	// Sanitise username input
+	$user = $_POST[ 'username' ];
+	$user = stripslashes( $user );
+	$user = ((isset($GLOBALS["___mysqli_ston"]) && is_object($GLOBALS["___mysqli_ston"])) ? mysqli_real_escape_string($GLOBALS["___mysqli_ston"],  $user ) : ((trigger_error("[MySQLConverterToo] Fix the mysql_escape_string() call! This code does not work.", E_USER_ERROR)) ? "" : ""));
+
+	// Sanitise password input
+	$pass = $_POST[ 'password' ];
+	$pass = stripslashes( $pass );
+	$pass = ((isset($GLOBALS["___mysqli_ston"]) && is_object($GLOBALS["___mysqli_ston"])) ? mysqli_real_escape_string($GLOBALS["___mysqli_ston"],  $pass ) : ((trigger_error("[MySQLConverterToo] Fix the mysql_escape_string() call! This code does not work.", E_USER_ERROR)) ? "" : ""));
 	$pass = md5( $pass );
 
-	// Check the database. Both values are bound as parameters, so neither can alter the query.
-	$data = $db->prepare( 'SELECT * FROM users WHERE user = (:user) AND password = (:password) LIMIT 1;' );
+	// Default values
+	$total_failed_login = 3;
+	$lockout_time       = 15;
+	$account_locked     = false;
+
+	// Check the database (Check user information)
+	$data = $db->prepare( 'SELECT failed_login, last_login FROM users WHERE user = (:user) LIMIT 1;' );
 	$data->bindParam( ':user', $user, PDO::PARAM_STR );
+	$data->execute();
+	$row = $data->fetch();
+
+	// Check to see if the user has been locked out.
+	if( ( $data->rowCount() == 1 ) && ( $row[ 'failed_login' ] >= $total_failed_login ) )  {
+		// User locked out.  Note, using this method would allow for user enumeration!
+		//$html .= "<pre><br />This account has been locked due to too many incorrect logins.</pre>";
+
+		// Calculate when the user would be allowed to login again
+		$last_login = strtotime( $row[ 'last_login' ] );
+		$timeout    = $last_login + ($lockout_time * 60);
+		$timenow    = time();
+
+		/*
+		print "The last login was: " . date ("h:i:s", $last_login) . "<br />";
+		print "The timenow is: " . date ("h:i:s", $timenow) . "<br />";
+		print "The timeout is: " . date ("h:i:s", $timeout) . "<br />";
+		*/
+
+		// Check to see if enough time has passed, if it hasn't locked the account
+		if( $timenow < $timeout ) {
+			$account_locked = true;
+			// print "The account is locked<br />";
+		}
+	}
+
+	// Check the database (if username matches the password)
+	$data = $db->prepare( 'SELECT * FROM users WHERE user = (:user) AND password = (:password) LIMIT 1;' );
+	$data->bindParam( ':user', $user, PDO::PARAM_STR);
 	$data->bindParam( ':password', $pass, PDO::PARAM_STR );
 	$data->execute();
 	$row = $data->fetch();
 
-	if( $data->rowCount() == 1 ) {
+	// If its a valid login...
+	if( ( $data->rowCount() == 1 ) && ( $account_locked == false ) ) {
 		// Get users details
-		$avatar = $row[ 'avatar' ];
+		$avatar       = $row[ 'avatar' ];
+		$failed_login = $row[ 'failed_login' ];
+		$last_login   = $row[ 'last_login' ];
 
-		// Login successful. The username is attacker-controlled text being placed into HTML, so
-		// it is escaped on the way out rather than reflected raw as it was before.
-		$html .= "<p>Welcome to the password protected area " . htmlspecialchars( $user, ENT_QUOTES, 'UTF-8' ) . "</p>";
-		$html .= "<img src=\"" . htmlspecialchars( $avatar, ENT_QUOTES, 'UTF-8' ) . "\" />";
-	}
-	else {
+		// Login successful
+		$html .= "<p>Welcome to the password protected area <em>{$user}</em></p>";
+		$html .= "<img src=\"{$avatar}\" />";
+
+		// Had the account been locked out since last login?
+		if( $failed_login >= $total_failed_login ) {
+			$html .= "<p><em>Warning</em>: Someone might of been brute forcing your account.</p>";
+			$html .= "<p>Number of login attempts: <em>{$failed_login}</em>.<br />Last login attempt was at: <em>{$last_login}</em>.</p>";
+		}
+
+		// Reset bad login count
+		$data = $db->prepare( 'UPDATE users SET failed_login = "0" WHERE user = (:user) LIMIT 1;' );
+		$data->bindParam( ':user', $user, PDO::PARAM_STR );
+		$data->execute();
+	} else {
 		// Login failed
-		$html .= "<pre><br />Username and/or password incorrect.</pre>";
+		sleep( rand( 2, 4 ) );
+
+		// Give the user some feedback
+		$html .= "<pre><br />Username and/or password incorrect.<br /><br/>Alternative, the account has been locked because of too many failed logins.<br />If this is the case, <em>please try again in {$lockout_time} minutes</em>.</pre>";
+
+		// Update bad login count
+		$data = $db->prepare( 'UPDATE users SET failed_login = (failed_login + 1) WHERE user = (:user) LIMIT 1;' );
+		$data->bindParam( ':user', $user, PDO::PARAM_STR );
+		$data->execute();
 	}
+
+	// Set the last login time
+	$data = $db->prepare( 'UPDATE users SET last_login = now() WHERE user = (:user) LIMIT 1;' );
+	$data->bindParam( ':user', $user, PDO::PARAM_STR );
+	$data->execute();
 }
+
+// Generate Anti-CSRF token
+generateSessionToken();
 
 ?>

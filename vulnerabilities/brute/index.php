@@ -12,7 +12,10 @@ $page[ 'help_button' ]   = 'brute';
 $page[ 'source_button' ] = 'brute';
 dvwaDatabaseConnect();
 
-$method            = 'GET';
+// Every level now posts the login rather than sending it as a query string, so the method is no
+// longer switched per level. A GET login puts the username and password in the URL, where they
+// are recorded in access logs, browser history and the Referer of any off-site link on the page.
+$method            = 'POST';
 $vulnerabilityFile = '';
 switch( dvwaSecurityLevelGet() ) {
 	case 'low':
@@ -26,7 +29,6 @@ switch( dvwaSecurityLevelGet() ) {
 		break;
 	default:
 		$vulnerabilityFile = 'impossible.php';
-		$method = 'POST';
 		break;
 }
 
@@ -47,8 +49,9 @@ $page[ 'body' ] .= "
 			<br />
 			<input type=\"submit\" value=\"Login\" name=\"Login\">\n";
 
-if( $vulnerabilityFile == 'high.php' || $vulnerabilityFile == 'impossible.php' )
-	$page[ 'body' ] .= "			" . tokenField();
+// Every level checks the anti-CSRF token now, so every level's form has to carry one. Rendering
+// it for only some levels would leave a form that cannot satisfy its own handler.
+$page[ 'body' ] .= "			" . tokenField();
 
 $page[ 'body' ] .= "
 		</form>
