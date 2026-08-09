@@ -31,11 +31,15 @@ switch( dvwaSecurityLevelGet() ) {
 
 require_once DVWA_WEB_PAGE_TO_ROOT . "vulnerabilities/xss_d/source/{$vulnerabilityFile}";
 
-# For the impossible level, don't decode the querystring
-$decodeURI = "decodeURI";
-if ($vulnerabilityFile == 'impossible.php') {
-	$decodeURI = "";
-}
+# The querystring is never decoded before it is written into the page, at any level -- this is
+# the impossible level's control, applied throughout.
+#
+# It matters because the sink below reads document.location.href, and the part of the URL after
+# a '#' is never sent to the server, so no server-side check can see it. What stops the fragment
+# from becoming markup is that the browser percent-encodes '<' and '>' in href: the value arrives
+# as %3Cscript%3E and is written as literal text. Calling decodeURI on it undid exactly that
+# protection and handed the attacker back their angle brackets.
+$decodeURI = "";
 
 $page[ 'body' ] = <<<EOF
 <div class="body_padded">
