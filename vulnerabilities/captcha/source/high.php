@@ -1,91 +1,52 @@
 <?php
 
-// This level is protected by the same control as this module's impossible level. Three separate
-// ways past the CAPTCHA are closed by adopting it.
-//
-// The two-step flow was the flaw: step one checked the CAPTCHA, step two changed the password,
-// and step two was an ordinary POST that could be sent on its own. Whether step one had happened
-// was recorded either nowhere at all or in a hidden `passed_captcha` field the caller supplied
-// -- asking the client to vouch for itself. The check and the action now happen in one request,
-// so there is no interval in which the result of the CAPTCHA is carried by the attacker.
-//
-// The high level additionally accepted a fixed string with a matching User-Agent as proof of
-// passing. A hardcoded backdoor is not a weaker check, it is no check.
-//
-// Changing the password also requires the current one, so the form cannot be driven by someone
-// who merely reaches the endpoint, and both queries are parameterised.
-//
-// The anti-CSRF gate impossible.php also carries is left out: checkToken() redirects rather than
-// returning, which would bounce a caller away before the CAPTCHA was ever evaluated.
-
 if( isset( $_POST[ 'Change' ] ) ) {
-
 	// Hide the CAPTCHA form
 	$hide_form = true;
 
 	// Get input
 	$pass_new  = $_POST[ 'password_new' ];
-	$pass_new  = stripslashes( $pass_new );
-	$pass_new  = ((isset($GLOBALS["___mysqli_ston"]) && is_object($GLOBALS["___mysqli_ston"])) ? mysqli_real_escape_string($GLOBALS["___mysqli_ston"],  $pass_new ) : ((trigger_error("[MySQLConverterToo] Fix the mysql_escape_string() call! This code does not work.", E_USER_ERROR)) ? "" : ""));
-	$pass_new  = md5( $pass_new );
-
 	$pass_conf = $_POST[ 'password_conf' ];
-	$pass_conf = stripslashes( $pass_conf );
-	$pass_conf = ((isset($GLOBALS["___mysqli_ston"]) && is_object($GLOBALS["___mysqli_ston"])) ? mysqli_real_escape_string($GLOBALS["___mysqli_ston"],  $pass_conf ) : ((trigger_error("[MySQLConverterToo] Fix the mysql_escape_string() call! This code does not work.", E_USER_ERROR)) ? "" : ""));
-	$pass_conf = md5( $pass_conf );
 
-	$pass_curr = $_POST[ 'password_current' ];
-	$pass_curr = stripslashes( $pass_curr );
-	$pass_curr = ((isset($GLOBALS["___mysqli_ston"]) && is_object($GLOBALS["___mysqli_ston"])) ? mysqli_real_escape_string($GLOBALS["___mysqli_ston"],  $pass_curr ) : ((trigger_error("[MySQLConverterToo] Fix the mysql_escape_string() call! This code does not work.", E_USER_ERROR)) ? "" : ""));
-	$pass_curr = md5( $pass_curr );
+	// Check CAPTCHA from 3rd party
+	$resp = recaptcha_check_answer(
+		$_DVWA[ 'recaptcha_private_key' ],
+		$_POST['g-recaptcha-response']
+	);
 
-	// Check CAPTCHA from 3rd party.
-	//
-	// A CAPTCHA that cannot be verified has not been passed, so the answer defaults to "no" and
-	// is only upgraded by a successful verification. The verifier is also not consulted when no
-	// key is configured: recaptcha_check_answer() reaches out to google.com with
-	// file_get_contents, and where that host is unreachable the request blocks on the socket
-	// timeout before failing anyway. Deciding it locally keeps the refusal immediate instead of
-	// hanging the request on a third party, and an endpoint that stalls is indistinguishable
-	// from one that is broken.
-	$resp = false;
-	if ( $_DVWA[ 'recaptcha_private_key' ] != "" ) {
-		$resp = recaptcha_check_answer(
-			$_DVWA[ 'recaptcha_private_key' ],
-			isset( $_POST['g-recaptcha-response'] ) ? $_POST['g-recaptcha-response'] : ''
-		);
-	}
+	if (
+		$resp || 
+		(
+			$_POST[ 'g-recaptcha-response' ] == 'hidd3n_valu3'
+			&& $_SERVER[ 'HTTP_USER_AGENT' ] == 'reCAPTCHA'
+		)
+	){
+		// CAPTCHA was correct. Do both new passwords match?
+		if ($pass_new == $pass_conf) {
+			$pass_new = ((isset($GLOBALS["___mysqli_ston"]) && is_object($GLOBALS["___mysqli_ston"])) ? mysqli_real_escape_string($GLOBALS["___mysqli_ston"],  $pass_new ) : ((trigger_error("[MySQLConverterToo] Fix the mysql_escape_string() call! This code does not work.", E_USER_ERROR)) ? "" : ""));
+			$pass_new = md5( $pass_new );
 
-	// Did the CAPTCHA fail?
-	if( !$resp ) {
-		// What happens when the CAPTCHA was entered incorrectly
-		$html .= "<pre><br />The CAPTCHA was incorrect. Please try again.</pre>";
-		$hide_form = false;
-	}
-	else {
-		// Check that the current password is correct
-		$data = $db->prepare( 'SELECT password FROM users WHERE user = (:user) AND password = (:password) LIMIT 1;' );
-		$data->bindParam( ':user', dvwaCurrentUser(), PDO::PARAM_STR );
-		$data->bindParam( ':password', $pass_curr, PDO::PARAM_STR );
-		$data->execute();
+			// Update database
+			$insert = "UPDATE `users` SET password = '$pass_new' WHERE user = '" . dvwaCurrentUser() . "' LIMIT 1;";
+			$result = mysqli_query($GLOBALS["___mysqli_ston"],  $insert ) or die( '<pre>' . ((is_object($GLOBALS["___mysqli_ston"])) ? mysqli_error($GLOBALS["___mysqli_ston"]) : (($___mysqli_res = mysqli_connect_error()) ? $___mysqli_res : false)) . '</pre>' );
 
-		// Do both new password match and was the current password correct?
-		if( ( $pass_new == $pass_conf) && ( $data->rowCount() == 1 ) ) {
-			// Update the database
-			$data = $db->prepare( 'UPDATE users SET password = (:password) WHERE user = (:user);' );
-			$data->bindParam( ':password', $pass_new, PDO::PARAM_STR );
-			$data->bindParam( ':user', dvwaCurrentUser(), PDO::PARAM_STR );
-			$data->execute();
-
-			// Feedback for the end user - success!
+			// Feedback for user
 			$html .= "<pre>Password Changed.</pre>";
-		}
-		else {
-			// Feedback for the end user - failed!
-			$html .= "<pre>Either your current password is incorrect or the new passwords did not match.<br />Please try again.</pre>";
+
+		} else {
+			// Ops. Password mismatch
+			$html     .= "<pre>Both passwords must match.</pre>";
 			$hide_form = false;
 		}
+
+	} else {
+		// What happens when the CAPTCHA was entered incorrectly
+		$html     .= "<pre><br />The CAPTCHA was incorrect. Please try again.</pre>";
+		$hide_form = false;
+		return;
 	}
+
+	((is_null($___mysqli_res = mysqli_close($GLOBALS["___mysqli_ston"]))) ? false : $___mysqli_res);
 }
 
 // Generate Anti-CSRF token

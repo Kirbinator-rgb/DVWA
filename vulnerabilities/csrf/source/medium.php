@@ -1,60 +1,37 @@
 <?php
 
-// This level is protected by the same control as this module's impossible level. Unlike the
-// other modules, the anti-CSRF token is kept here rather than dropped: this module's graded
-// weakness *is* cross-site request forgery, so checkToken() is the control under test and not
-// incidental scaffolding. It is backed by re-authentication -- the current password must be
-// supplied -- so a forged request still fails even if an attacker obtains a token.
-//
-// index.php has been updated to render the current-password and token fields at every level,
-// because a handler that requires them and a form that omits them would leave the module's own
-// entry point unusable.
-
 if( isset( $_GET[ 'Change' ] ) ) {
-	// Check Anti-CSRF token
-	checkToken( $_REQUEST[ 'user_token' ], $_SESSION[ 'session_token' ], 'index.php' );
+	// Checks to see where the request came from
+	if( stripos( $_SERVER[ 'HTTP_REFERER' ] ,$_SERVER[ 'SERVER_NAME' ]) !== false ) {
+		// Get input
+		$pass_new  = $_GET[ 'password_new' ];
+		$pass_conf = $_GET[ 'password_conf' ];
 
-	// Get input
-	$pass_curr = $_GET[ 'password_current' ];
-	$pass_new  = $_GET[ 'password_new' ];
-	$pass_conf = $_GET[ 'password_conf' ];
+		// Do the passwords match?
+		if( $pass_new == $pass_conf ) {
+			// They do!
+			$pass_new = ((isset($GLOBALS["___mysqli_ston"]) && is_object($GLOBALS["___mysqli_ston"])) ? mysqli_real_escape_string($GLOBALS["___mysqli_ston"],  $pass_new ) : ((trigger_error("[MySQLConverterToo] Fix the mysql_escape_string() call! This code does not work.", E_USER_ERROR)) ? "" : ""));
+			$pass_new = md5( $pass_new );
 
-	// Sanitise current password input
-	$pass_curr = stripslashes( $pass_curr );
-	$pass_curr = ((isset($GLOBALS["___mysqli_ston"]) && is_object($GLOBALS["___mysqli_ston"])) ? mysqli_real_escape_string($GLOBALS["___mysqli_ston"],  $pass_curr ) : ((trigger_error("[MySQLConverterToo] Fix the mysql_escape_string() call! This code does not work.", E_USER_ERROR)) ? "" : ""));
-	$pass_curr = md5( $pass_curr );
+			// Update the database
+			$current_user = dvwaCurrentUser();
+			$insert = "UPDATE `users` SET password = '$pass_new' WHERE user = '" . $current_user . "';";
+			$result = mysqli_query($GLOBALS["___mysqli_ston"],  $insert ) or die( '<pre>' . ((is_object($GLOBALS["___mysqli_ston"])) ? mysqli_error($GLOBALS["___mysqli_ston"]) : (($___mysqli_res = mysqli_connect_error()) ? $___mysqli_res : false)) . '</pre>' );
 
-	// Check that the current password is correct
-	$data = $db->prepare( 'SELECT password FROM users WHERE user = (:user) AND password = (:password) LIMIT 1;' );
-	$current_user = dvwaCurrentUser();
-	$data->bindParam( ':user', $current_user, PDO::PARAM_STR );
-	$data->bindParam( ':password', $pass_curr, PDO::PARAM_STR );
-	$data->execute();
-
-	// Do both new passwords match and does the current password match the user?
-	if( ( $pass_new == $pass_conf ) && ( $data->rowCount() == 1 ) ) {
-		// It does!
-		$pass_new = stripslashes( $pass_new );
-		$pass_new = ((isset($GLOBALS["___mysqli_ston"]) && is_object($GLOBALS["___mysqli_ston"])) ? mysqli_real_escape_string($GLOBALS["___mysqli_ston"],  $pass_new ) : ((trigger_error("[MySQLConverterToo] Fix the mysql_escape_string() call! This code does not work.", E_USER_ERROR)) ? "" : ""));
-		$pass_new = md5( $pass_new );
-
-		// Update database with new password
-		$data = $db->prepare( 'UPDATE users SET password = (:password) WHERE user = (:user);' );
-		$data->bindParam( ':password', $pass_new, PDO::PARAM_STR );
-		$current_user = dvwaCurrentUser();
-		$data->bindParam( ':user', $current_user, PDO::PARAM_STR );
-		$data->execute();
-
-		// Feedback for the user
-		$html .= "<pre>Password Changed.</pre>";
+			// Feedback for the user
+			$html .= "<pre>Password Changed.</pre>";
+		}
+		else {
+			// Issue with passwords matching
+			$html .= "<pre>Passwords did not match.</pre>";
+		}
 	}
 	else {
-		// Issue with passwords matching
-		$html .= "<pre>Passwords did not match or current password incorrect.</pre>";
+		// Didn't come from a trusted source
+		$html .= "<pre>That request didn't look correct.</pre>";
 	}
-}
 
-// Generate Anti-CSRF token
-generateSessionToken();
+	((is_null($___mysqli_res = mysqli_close($GLOBALS["___mysqli_ston"]))) ? false : $___mysqli_res);
+}
 
 ?>
