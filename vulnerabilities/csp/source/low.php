@@ -1,22 +1,18 @@
 <?php
 
-// This level is protected by the same policy as this module's impossible level: script-src is
-// narrowed to 'self'. The previous list allowed script from a dozen third-party hosts --
-// pastebin, hastebin, unpkg, jsDelivr and friends -- any one of which will serve attacker
-// authored JavaScript on request, so the policy named trusted origins that are not trustworthy
-// and permitted exactly the injection it was meant to prevent.
-$headerCSP = "Content-Security-Policy: script-src 'self';";
+$headerCSP = "Content-Security-Policy: script-src 'self' https://pastebin.com hastebin.com www.toptal.com example.com code.jquery.com https://ssl.google-analytics.com unpkg.com cdn.jsdelivr.net digi.ninja ;"; // allows js from various trusted locations
 
 header($headerCSP);
+
+# These might work if you can't create your own for some reason
+# https://cdn.jsdelivr.net/gh/digininja/csp_bypass/alert.js
+# https://unpkg.com/@digininja/csp_bypass@1.0.0/index.js
 
 ?>
 <?php
 if (isset ($_POST['include'])) {
-// The submitted value is placed in a quoted attribute, so it is escaped on the way out. Without
-// this a value containing a quote closes src= early and appends attributes or a second tag,
-// which is an injection the policy above should not have to be the only thing catching.
 $page[ 'body' ] .= "
-	<script src='" . htmlspecialchars( $_POST['include'], ENT_QUOTES, 'UTF-8' ) . "'></script>
+	<script src='" . $_POST['include'] . "'></script>
 ";
 }
 $page[ 'body' ] .= '
