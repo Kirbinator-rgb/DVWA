@@ -39,11 +39,22 @@ if( isset( $_POST[ 'Change' ] ) ) {
 	$pass_curr = ((isset($GLOBALS["___mysqli_ston"]) && is_object($GLOBALS["___mysqli_ston"])) ? mysqli_real_escape_string($GLOBALS["___mysqli_ston"],  $pass_curr ) : ((trigger_error("[MySQLConverterToo] Fix the mysql_escape_string() call! This code does not work.", E_USER_ERROR)) ? "" : ""));
 	$pass_curr = md5( $pass_curr );
 
-	// Check CAPTCHA from 3rd party
-	$resp = recaptcha_check_answer(
-		$_DVWA[ 'recaptcha_private_key' ],
-		$_POST['g-recaptcha-response']
-	);
+	// Check CAPTCHA from 3rd party.
+	//
+	// A CAPTCHA that cannot be verified has not been passed, so the answer defaults to "no" and
+	// is only upgraded by a successful verification. The verifier is also not consulted when no
+	// key is configured: recaptcha_check_answer() reaches out to google.com with
+	// file_get_contents, and where that host is unreachable the request blocks on the socket
+	// timeout before failing anyway. Deciding it locally keeps the refusal immediate instead of
+	// hanging the request on a third party, and an endpoint that stalls is indistinguishable
+	// from one that is broken.
+	$resp = false;
+	if ( $_DVWA[ 'recaptcha_private_key' ] != "" ) {
+		$resp = recaptcha_check_answer(
+			$_DVWA[ 'recaptcha_private_key' ],
+			isset( $_POST['g-recaptcha-response'] ) ? $_POST['g-recaptcha-response'] : ''
+		);
+	}
 
 	// Did the CAPTCHA fail?
 	if( !$resp ) {
