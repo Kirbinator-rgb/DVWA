@@ -29,49 +29,41 @@ switch( dvwaSecurityLevelGet() ) {
 		break;
 }
 
-// The phrase the form offers. The server issues a token for this value and no other.
-$default_phrase = "ChangeMe";
-
-// A per-session secret that never leaves the server. Without it the token below cannot be
-// computed, only received.
-if (!array_key_exists ("javascript_secret", $_SESSION)) {
-	$_SESSION['javascript_secret'] = bin2hex (random_bytes (16));
-}
-
-// The token binds a *specific phrase* to the server's authorisation of it, keyed by a secret the
-// client never sees.
-//
-// What was here before recomputed a fixed function of the submitted phrase --
-// md5(str_rot13(...)), a reversed string, a doubled SHA-256 -- and compared it to what the caller
-// sent. Every one of those is derivable from data the client already holds, using an algorithm
-// the page itself ships to the browser, so the token proved only that the sender could read the
-// source. Obfuscating the algorithm changes nothing: it is still being executed on the
-// attacker's machine.
-//
-// Note that a session-wide token would not fix this either. Any client that loads the page is
-// handed one, so it would authorise *any* phrase the holder cared to submit. What matters is
-// that the token commits to the phrase, so the only phrase that can be submitted is the one the
-// server chose to authorise.
-function phrase_token ($phrase) {
-	return hash_hmac ('sha256', $phrase, $_SESSION['javascript_secret']);
-}
-
 $message = "";
-// Check what was sent in to see if it was what was expected. The level's own `token` field is
-// left in place so each level's script still demonstrates the point; the server simply no longer
-// treats it as authority.
+// Check what was sent in to see if it was what was expected
 if ($_SERVER['REQUEST_METHOD'] == "POST") {
-	if (array_key_exists ("phrase", $_POST) && array_key_exists ("user_token", $_POST)) {
+	if (array_key_exists ("phrase", $_POST) && array_key_exists ("token", $_POST)) {
 
 		$phrase = $_POST['phrase'];
-		$submitted_token = $_POST['user_token'];
+		$token = $_POST['token'];
 
-		// Compared in constant time so the response time cannot be used to recover the token.
-		if (!is_string ($phrase) || !is_string ($submitted_token)
-			|| !hash_equals (phrase_token ($phrase), $submitted_token)) {
-			$message = "<p>Invalid token.</p>";
-		} else if ($phrase == "success") {
-			$message = "<p style='color:red'>Well done!</p>";
+		if ($phrase == "success") {
+			switch( dvwaSecurityLevelGet() ) {
+				case 'low':
+					if ($token == md5(str_rot13("success"))) {
+						$message = "<p style='color:red'>Well done!</p>";
+					} else {
+						$message = "<p>Invalid token.</p>";
+					}
+					break;
+				case 'medium':
+					if ($token == strrev("XXsuccessXX")) {
+						$message = "<p style='color:red'>Well done!</p>";
+					} else {
+						$message = "<p>Invalid token.</p>";
+					}
+					break;
+				case 'high':
+					if ($token == hash("sha256", hash("sha256", "XX" . strrev("success")) . "ZZ")) {
+						$message = "<p style='color:red'>Well done!</p>";
+					} else {
+						$message = "<p>Invalid token.</p>";
+					}
+					break;
+				default:
+					$vulnerabilityFile = 'impossible.php';
+					break;
+			}
 		} else {
 			$message = "<p>You got the phrase wrong.</p>";
 		}
@@ -79,8 +71,6 @@ if ($_SERVER['REQUEST_METHOD'] == "POST") {
 		$message = "<p>Missing phrase or token.</p>";
 	}
 }
-
-$user_token_field = "<input type=\"hidden\" name=\"user_token\" value=\"" . phrase_token ($default_phrase) . "\" />";
 
 if ( dvwaSecurityLevelGet() == "impossible" ) {
 $page[ 'body' ] = <<<EOF
@@ -106,8 +96,7 @@ $page[ 'body' ] = <<<EOF
 
 	<form name="low_js" method="post">
 		<input type="hidden" name="token" value="" id="token" />
-		$user_token_field
-		<label for="phrase">Phrase</label> <input type="text" name="phrase" value="$default_phrase" id="phrase" />
+		<label for="phrase">Phrase</label> <input type="text" name="phrase" value="ChangeMe" id="phrase" />
 		<input type="submit" id="send" name="send" value="Submit" />
 	</form>
 EOF;
