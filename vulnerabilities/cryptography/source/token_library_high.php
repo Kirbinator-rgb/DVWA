@@ -1,29 +1,45 @@
 <?php
 
+// This level now uses the same construction as this module's impossible level: AES-256-GCM with
+// a fresh random IV per token, and the authentication tag stored alongside the ciphertext.
+//
+// What was here before was aes-128-cbc under a **constant IV** compiled into the source. CBC
+// provides no integrity at all, so a token could be modified in transit and would still decrypt
+// -- flipping a bit of ciphertext flips the matching bit of the next plaintext block, which is
+// enough to edit fields such as the privilege level without ever knowing the key. Reusing one IV
+// for every token compounds it: identical plaintext prefixes produce identical ciphertext
+// prefixes, so tokens can be compared and spliced.
+//
+// GCM fixes both. The tag is verified before the plaintext is returned, so a tampered token is
+// rejected rather than silently decrypted, and the random IV means two tokens never line up.
+
 define ("KEY", "rainbowclimbinghigh");
-define ("ALGO", "aes-128-cbc");
-define ("IV", "1234567812345678");
+define ("ALGO", "aes-256-gcm");
 
 function encrypt ($plaintext, $iv) {
 	# Default padding is PKCS#7 which is interchangeable with PKCS#5
 	# https://en.wikipedia.org/wiki/Padding_%28cryptography%29#PKCS#5_and_PKCS#7
 
-	if (strlen ($iv) != 16) {
-		throw new Exception ("IV must be 16 bytes, " . strlen ($iv) . " passed");
+	if (strlen ($iv) != 12) {
+		throw new Exception ("IV must be 12 bytes, " . strlen ($iv) . " passed");
 	}
-	$tag = "";
+
 	$e = openssl_encrypt($plaintext, ALGO, KEY, OPENSSL_RAW_DATA, $iv, $tag);
 	if ($e === false) {
 		throw new Exception ("Encryption failed");
 	}
-	return $e;
+	return $e . $tag;
 }
 
 function decrypt ($ciphertext, $iv) {
-	if (strlen ($iv) != 16) {
-		throw new Exception ("IV must be 16 bytes, " . strlen ($iv) . " passed");
+	if (strlen ($iv) != 12) {
+		throw new Exception ("IV must be 12 bytes, " . strlen ($iv) . " passed");
 	}
-	$e = openssl_decrypt($ciphertext, ALGO, KEY, OPENSSL_RAW_DATA, $iv);
+
+    $tag = substr($ciphertext, -16);
+	$text = substr($ciphertext, 0, -16);
+
+	$e = openssl_decrypt($text, ALGO, KEY, OPENSSL_RAW_DATA, $iv, $tag);
 	if ($e === false) {
 		throw new Exception ("Decryption failed");
 	}
@@ -33,19 +49,14 @@ function decrypt ($ciphertext, $iv) {
 // Added the debug flag so that when calling from the script
 // the function can print the data used to create the token
 
-function create_token ($debug = false) {
+function create_token () {
 	$token = "userid:2";
+	$iv = openssl_random_pseudo_bytes(12, $cstrong);
 
-	if ($debug) {
-		print "Clear text token: " . $token . "\n";
-		print "Encryption key: " . KEY . "\n";
-		print "IV: " . (IV) . "\n";
-	}
-
-	$e = encrypt ($token, IV);
+	$e = encrypt ($token, $iv);
 	$data = array (
 					"token" => base64_encode ($e),
-					"iv" => base64_encode (IV)
+					"iv" => base64_encode ($iv),
 				);
 	return json_encode($data);
 }

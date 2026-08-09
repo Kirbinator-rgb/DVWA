@@ -1,13 +1,39 @@
 <?php
-function decrypt ($ciphertext, $key) {
-	$e = openssl_decrypt($ciphertext, 'aes-128-ecb', $key, OPENSSL_PKCS1_PADDING);
+// Session tokens are now AES-256-GCM, carrying their own authentication tag, and the token is
+// laid out as iv(12) || ciphertext || tag(16).
+//
+// The previous construction was aes-128-ecb. ECB encrypts every 16-byte block independently
+// under the same key, which has two consequences the challenge above is built on: identical
+// plaintext blocks yield identical ciphertext blocks, so tokens can be compared to locate the
+// fields inside them; and because no block is bound to any other, blocks can be reordered or
+// spliced between tokens. That is exactly the documented attack -- take the block holding
+// `"level":"admin"` from one captured token, the block naming the user from another, paste them
+// together and the server decrypts the result perfectly happily. ECB never provides integrity,
+// so the server had no way to notice.
+//
+// GCM binds the whole message: the tag is verified before any plaintext is returned, so a
+// spliced or edited token is rejected outright rather than decrypted into a privilege grant.
+// The IV is unique per token, so two tokens no longer share block boundaries to compare.
+function decrypt ($token, $key) {
+	// 12 byte IV + at least one byte of ciphertext + 16 byte tag.
+	if (strlen ($token) < 29) {
+		throw new Exception ("Decryption failed");
+	}
+
+	$iv         = substr ($token, 0, 12);
+	$tag        = substr ($token, -16);
+	$ciphertext = substr ($token, 12, -16);
+
+	$e = openssl_decrypt($ciphertext, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
 	if ($e === false) {
 		throw new Exception ("Decryption failed");
 	}
 	return $e;
 }
 
-$key = "ik ben een aardbei";
+// A passphrase is not a key. aes-256-gcm needs 32 bytes of key material, so the passphrase is
+// run through SHA-256 rather than being padded or truncated into place.
+$key = hash ('sha256', "ik ben een aardbei", true);
 
 $errors = "";
 $success = "";
@@ -19,7 +45,10 @@ if ($_SERVER['REQUEST_METHOD'] == "POST") {
 			throw new Exception ("No token passed");
 		} else {
 			$token = $_POST['token'];
-			if (strlen($token) % 32 != 0) {
+			// The old check required a multiple of 32 hex characters, which only made sense as
+			// an ECB block-size assumption. What matters now is that the value is hex and long
+			// enough to carry an IV, a body and a tag.
+			if (strlen($token) % 2 != 0 || !ctype_xdigit($token) || strlen($token) < 58) {
 				throw new Exception ("Token is in wrong format");
 			} else {
 				$decrypted = decrypt(hex2bin ($token), $key);
