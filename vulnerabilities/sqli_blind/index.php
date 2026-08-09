@@ -73,7 +73,10 @@ else {
 	$page[ 'body' ] .= "\n				<input type=\"submit\" name=\"Submit\" value=\"Submit\">
 			</p>\n";
 
-	if( $vulnerabilityFile == 'impossible.php' )
+	// The low level checks the anti-CSRF token now, so its form has to carry one -- a handler that
+	// demands a token from a form that never renders it cannot be satisfied by anyone. The medium
+	// and high forms are left exactly as they were.
+	if( $vulnerabilityFile == 'low.php' || $vulnerabilityFile == 'impossible.php' )
 		$page[ 'body' ] .= "			" . tokenField();
 
 	$page[ 'body' ] .= "
